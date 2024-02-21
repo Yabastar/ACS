@@ -41,25 +41,23 @@ function is_prime(n, k)
       local a = math.random(2, n - 2)
       local x = mod_exp(a, d, n)
       if x == 1 or x == n - 1 then
-        goto continue
-      end
-
-      local prime = false
-      for r = 1, math.floor(math.log(n - 1) / math.log(2)) - 1 do
-        x = mod_exp(x, 2, n)
-        if x == n - 1 then
-          prime = true
-          break
+        -- Continue to the next iteration of the loop
+      else
+        local prime = true
+        for r = 1, math.floor(math.log(n - 1) / math.log(2)) - 1 do
+          x = mod_exp(x, 2, n)
+          if x == n - 1 then
+            prime = true
+            break
+          else
+            prime = false
+          end
+        end
+        if not prime then
+          return false
         end
       end
-
-      if not prime then
-        return false
-      end
-
-      ::continue::
     end
-
     return true
   end
 end

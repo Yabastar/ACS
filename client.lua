@@ -1,102 +1,112 @@
--- Function to calculate the modular exponentiation (a^b mod m)
-function mod_exp(a, b, m)
-  if b == 0 then
-    return 1
-  end
-  local result = 1
-  a = a % m
-  while b > 0 do
-    if b % 2 == 1 then
-      result = (result * a) % m
-    end
-    b = math.floor(b / 2)
-    a = (a * a) % m
-  end
-  return result
+if fs.exists("tmp") then
+    fs.delete("tmp")
 end
 
--- Function to generate a random prime number in a given range
-function generate_random_prime(lower_bound, upper_bound)
-  while true do
-    local num = math.random(lower_bound, upper_bound)
-    if is_prime(num, 5) then
-      return num
-    end
-  end
-end
+math.randomSeed(os.time())
 
--- Function to check if a number is prime using the Miller-Rabin primality test
-function is_prime(n, k)
-  if n <= 1 or n == 4 then
-    return false
-  elseif n <= 3 then
-    return true
-  else
-    local d = n - 1
-    while d % 2 == 0 do
-      d = d / 2
-    end
+shell.run("wget", "https://raw.githubusercontent.com/Yabastar/ACS/main/gen.lua", "tmp")
+local genTable = loadfile("tmp")()
+fs.delete("tmp")
 
-    for i = 1, k do
-      local a = math.random(2, n - 2)
-      local x = mod_exp(a, d, n)
-      if x == 1 or x == n - 1 then
-        -- Continue to the next iteration of the loop
-      else
-        local prime = true
-        for r = 1, math.floor(math.log(n - 1) / math.log(2)) - 1 do
-          x = mod_exp(x, 2, n)
-          if x == n - 1 then
-            prime = true
-            break
-          else
-            prime = false
-          end
+local p = genTable[1]
+local g = genTable[2]
+
+term.clear()
+term.setCursorPos(1,1)
+print("ACS Client CLI\n")
+
+local function is_prime(n, k)
+    if n <= 1 or n == 4 then
+        return false
+    elseif n <= 3 then
+        return true
+    else
+        local d = n - 1
+        while d % 2 == 0 do
+            d = d / 2
         end
-        if not prime then
-          return false
+
+        local isComposite = false
+        for i = 1, k do
+            local a = math.random(2, n - 2)
+            local x = mod_exp(a, d, n)
+            if x == 1 or x == n - 1 then
+                isComposite = false
+            else
+                local r = 1
+                while r <= math.floor(math.log(n - 1) / math.log(2)) - 1 and x ~= n - 1 do
+                    x = mod_exp(x, 2, n)
+                    r = r + 1
+                end
+                if x ~= n - 1 then
+                    isComposite = true
+                    break
+                end
+            end
         end
-      end
+
+        return not isComposite
     end
-    return true
-  end
 end
 
--- Function to perform Diffie-Hellman key exchange
-function diffie_hellman(serverId)
-  -- Step 1: Choose large prime p and primitive root g
-  local p = generate_random_prime(500, 1000)
-  local g = 2
-
-  -- Open a Rednet modem on the right side
-  rednet.open("right")
-
-  -- Step 2: Client generates a private key
-  local private_key_b = math.random(2, p - 2)
-  local public_key_b = mod_exp(g, private_key_b, p)
-
-  -- Step 3: Client sends its public key to the server
-  rednet.send(serverId, { public_key = public_key_b }, "diffie_hellman")
-
-  -- Step 4: Client receives the public key from the server
-  local senderId, message = rednet.receive("diffie_hellman", 5)
-  if not message or not message.public_key then
-    print("Timeout or invalid response. Exiting.")
-    rednet.close("right")
-    return
-  end
-  local server_public_key = message.public_key
-
-  -- Step 5: Client calculates the shared secret
-  local shared_secret_b = mod_exp(server_public_key, private_key_b, p)
-
-  -- The shared secret is printed
-  print("Shared Secret:", shared_secret_b)
-
-  -- Close the Rednet modem
-  rednet.close("right")
+local function find_primitive_root(p)
+    for g = 2, p - 1 do
+        local isRoot = true
+        for i = 1, p - 2 do
+            if mod_exp(g, i, p) == 1 then
+                isRoot = false
+                break
+            end
+        end
+        if isRoot then
+            return g
+        end
+    end
 end
 
--- Specify the ID of the server (Device 1)
-local serverId = 0
-diffie_hellman(serverId)
+local function prompt()
+    io.write(tostring(os.getComputerID()) .. " > ")
+    return (function() local words = {}; for word in io.read():gmatch("%S+") do table.insert(words, word) end; return words end)()
+end
+
+local host = 0
+
+while true do
+    local userprompt = prompt()
+    if userprompt[1] == "set" then
+        if userprompt[2] == "host" then
+            host = tonumber(userprompt[3])
+        end
+        if userprompt[2] == "prime" then
+            if is_prime(userprompt[3], 5) == true then
+                p = tonumber(userprompt[3])
+                g = find_primitive_root(p)
+            else
+                print("\n"..userprompt[3].." is not prime")
+            end
+        end
+
+rednet.send(host, genTable, "handshake")
+
+local a = math.random(2,1000)
+
+rednet.send(host, (g^a%p), "s1")
+
+local b = tonumber(rednet.receive("s2"))
+
+local s = b^a%p -- this is the key we have finally shared
+
+function encrypt(message, key)
+    local encrypted = {}
+    for i = 1, #message do
+        local charCode = string.byte(message, i)
+        local keyChar = string.byte(key, (i - 1) % #key + 1)
+        local encryptedChar = bit32.bxor(charCode, keyChar)
+        table.insert(encrypted, string.char(encryptedChar))
+    end
+    return table.concat(encrypted)
+end
+
+function decrypt(encryptedMessage, key)
+    return encrypt(encryptedMessage, key) -- XOR based encryption is its own inverse
+end
